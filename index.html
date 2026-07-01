@@ -545,6 +545,23 @@
                 </details>
             </div>
 
+            <!-- Animate Section -->
+            <div class="control-section">
+                <details class="section" open>
+                <summary>Animate</summary>
+                <div class="section-body">
+                <button class="button" id="breathe-btn" onclick="toggleBreathe()">▶ Breathe</button>
+                <div class="control-group" style="margin-top: 16px">
+                    <label>Speed</label>
+                    <div class="slider-container">
+                        <input type="range" id="animSpeed" min="0.2" max="3" step="0.1" value="1" oninput="animSpeed = parseFloat(this.value); document.getElementById('animSpeed-value').textContent = animSpeed.toFixed(1)">
+                        <span class="value-display" id="animSpeed-value">1.0</span>
+                    </div>
+                </div>
+                </div>
+                </details>
+            </div>
+
             <!-- Actions Section -->
             <div class="control-section">
                 <details class="section" open>
@@ -634,6 +651,12 @@
         let blobCount = 0;
         let cellSize = 0;
         let layer = null;     // offscreen buffer, reused for every blob
+        let layerPD = 2;      // layer pixel density (dropped to 1 while animating)
+        let tweenAnim = null; // {from, to, t0, dur} easing style params
+        let fadeAnim = null;  // {img, t0, dur} crossfade after structural changes
+        let lfo = {on: false, base: null, t: 0, last: 0}; // "Breathe" oscillator
+        let animSpeed = 1;
+        const styleParams = ['gap', 'roundness', 'filletDepth', 'neckWidth'];
 
         function blobAt(x, y) {
             if (x < 0 || y < 0 || x >= params.cols || y >= params.rows) return 0;
@@ -673,7 +696,79 @@
         }
 
         function draw() {
-            // rendering is done explicitly in render(); nothing animates
+            const now = millis();
+            let active = false;
+
+            if (tweenAnim) {
+                const k = Math.min(1, (now - tweenAnim.t0) / tweenAnim.dur);
+                const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; // easeInOutQuad
+                for (const key in tweenAnim.to) {
+                    params[key] = tweenAnim.from[key] + (tweenAnim.to[key] - tweenAnim.from[key]) * e;
+                    syncSliderUI(key);
+                }
+                if (k >= 1) tweenAnim = null; else active = true;
+            }
+
+            if (lfo.on) {
+                const dt = (now - (lfo.last || now)) / 1000;
+                lfo.last = now;
+                lfo.t += dt * animSpeed;
+                const t = lfo.t;
+                params.filletDepth = constrain(lfo.base.filletDepth - 0.4 * (0.5 + 0.5 * Math.sin(t * 0.55)), 0, 1);
+                params.neckWidth   = constrain(lfo.base.neckWidth + 0.18 * Math.sin(t * 0.8 + 1.3), 0.1, 0.8);
+                params.gap         = constrain(lfo.base.gap + 0.05 * Math.sin(t * 0.65 + 2.1), 0, 0.3);
+                params.roundness   = constrain(lfo.base.roundness - 0.2 * (0.5 + 0.5 * Math.sin(t * 0.4 + 0.7)), 0, 1);
+                styleParams.forEach(syncSliderUI);
+                active = true;
+            }
+
+            render();
+            if (fadeAnim) active = true; // render() clears it when the fade completes
+
+            if (!active) {
+                noLoop();
+                render(); // final pass at full resolution
+            }
+        }
+
+        function startTween(changes) {
+            const from = {}, to = {};
+            if (tweenAnim) Object.assign(to, tweenAnim.to);
+            Object.assign(to, changes);
+            for (const k in to) from[k] = params[k];
+            tweenAnim = {from, to, t0: millis(), dur: 320};
+            loop();
+        }
+
+        // snapshot the canvas, rebuild with new settings, dissolve between them
+        function transitionRebuild() {
+            fadeAnim = {img: get(), t0: millis(), dur: 450};
+            initializeSystem();
+            loop();
+        }
+
+        function toggleBreathe() {
+            const btn = document.getElementById('breathe-btn');
+            if (lfo.on) {
+                lfo.on = false;
+                btn.textContent = '▶ Breathe';
+                startTween({...lfo.base}); // ease back to where the user left things
+            } else {
+                lfo.base = {gap: params.gap, roundness: params.roundness,
+                            filletDepth: params.filletDepth, neckWidth: params.neckWidth};
+                lfo.t = 0;
+                lfo.last = millis();
+                lfo.on = true;
+                btn.textContent = '■ Stop';
+                loop();
+            }
+        }
+
+        function syncSliderUI(name) {
+            const el = document.getElementById(name);
+            if (!el) return;
+            el.value = params[name];
+            document.getElementById(name + '-value').textContent = params[name].toFixed(2);
         }
 
         function initializeSystem() {
@@ -785,10 +880,12 @@
             assignBlobColors();
             background(params.paperColor);
 
-            if (!layer || layer.width !== width || layer.height !== height) {
+            const pd = (tweenAnim || lfo.on) ? 1 : 2;
+            if (!layer || layer.width !== width || layer.height !== height || layerPD !== pd) {
                 if (layer) layer.remove();
                 layer = createGraphics(width, height);
-                layer.pixelDensity(2);
+                layer.pixelDensity(pd);
+                layerPD = pd;
             }
 
             for (let id = 1; id <= blobCount; id++) {
@@ -806,6 +903,18 @@
                 for (const [cx, cy] of geo.cuts) layer.circle(cx, cy, rf * 2);
                 layer.noErase();
                 image(layer, 0, 0, width, height);
+            }
+
+            if (fadeAnim) {
+                const k = (millis() - fadeAnim.t0) / fadeAnim.dur;
+                if (k < 1) {
+                    push();
+                    tint(255, 255 * (1 - k));
+                    image(fadeAnim.img, 0, 0, width, height);
+                    pop();
+                } else {
+                    fadeAnim = null;
+                }
             }
         }
 
@@ -1064,10 +1173,17 @@
 
         function updateParam(name, value) {
             const v = intParams.includes(name) ? parseInt(value) : parseFloat(value);
-            params[name] = v;
             document.getElementById(name + '-value').textContent =
                 intParams.includes(name) ? v : v.toFixed(2);
-            initializeSystem();
+            if (styleParams.includes(name)) {
+                startTween({[name]: v});       // geometry morphs smoothly
+            } else if (name === 'cols' || name === 'rows') {
+                params[name] = v;
+                initializeSystem();            // canvas resizes — no fade
+            } else {
+                params[name] = v;
+                transitionRebuild();           // new grid — dissolve
+            }
         }
 
         function updateColor(name, value) {
@@ -1138,7 +1254,7 @@
             let newSeed = parseInt(input.value);
             if (newSeed && newSeed > 0) {
                 params.seed = newSeed;
-                initializeSystem();
+                transitionRebuild();
             } else {
                 updateSeedDisplay();
             }
@@ -1147,22 +1263,27 @@
         function previousSeed() {
             params.seed = Math.max(1, params.seed - 1);
             updateSeedDisplay();
-            initializeSystem();
+            transitionRebuild();
         }
 
         function nextSeed() {
             params.seed = params.seed + 1;
             updateSeedDisplay();
-            initializeSystem();
+            transitionRebuild();
         }
 
         function randomSeedAndUpdate() {
             params.seed = Math.floor(Math.random() * 999999) + 1;
             updateSeedDisplay();
-            initializeSystem();
+            transitionRebuild();
         }
 
         function resetParameters() {
+            lfo.on = false;
+            tweenAnim = null;
+            fadeAnim = null;
+            const bb = document.getElementById('breathe-btn');
+            if (bb) bb.textContent = '▶ Breathe';
             params = {...defaultParams, palette: [...defaultParams.palette]};
             renderSwatches();
             renderPaperSwatches();
