@@ -732,9 +732,47 @@
             }
         }
 
-        function blobColor(id) {
+        let blobColorMap = [];
+
+        // Seeded graph coloring: each blob prefers the color indexed by its
+        // fixed random hue, but skips colors already used by touching
+        // neighbors (orthogonal or diagonal), and colors identical to the
+        // paper are excluded so no blob can vanish into the background.
+        function assignBlobColors() {
             const pal = params.palette.length ? params.palette : [params.inkColor];
-            return pal[Math.floor(blobHue[id] * pal.length) % pal.length];
+            const usable = pal.filter(c => c.toLowerCase() !== params.paperColor.toLowerCase());
+            const colors = usable.length ? usable : pal;
+            blobColorMap = new Array(blobCount + 1).fill(colors[0]);
+            if (colors.length === 1) return;
+
+            const adj = Array.from({length: blobCount + 1}, () => new Set());
+            for (let y = 0; y < params.rows; y++) {
+                for (let x = 0; x < params.cols; x++) {
+                    const a = grid[y][x];
+                    if (!a) continue;
+                    for (const [nx, ny] of [[x + 1, y], [x, y + 1], [x + 1, y + 1], [x - 1, y + 1]]) {
+                        const b = blobAt(nx, ny);
+                        if (b && b !== a) { adj[a].add(b); adj[b].add(a); }
+                    }
+                }
+            }
+
+            for (let id = 1; id <= blobCount; id++) {
+                const start = Math.floor(blobHue[id] * colors.length) % colors.length;
+                let chosen = colors[start];
+                for (let k = 0; k < colors.length; k++) {
+                    const c = colors[(start + k) % colors.length];
+                    let clash = false;
+                    for (const nb of adj[id])
+                        if (nb < id && blobColorMap[nb] === c) { clash = true; break; }
+                    if (!clash) { chosen = c; break; }
+                }
+                blobColorMap[id] = chosen;
+            }
+        }
+
+        function blobColor(id) {
+            return blobColorMap[id];
         }
 
         function render() {
@@ -743,6 +781,7 @@
             const R = params.roundness * (s / 2 - g); // convex corner radius (= half arm width at 1.0)
             const rf = params.filletDepth * (s / 2 + g); // concave fillet radius
 
+            assignBlobColors();
             background(params.paperColor);
 
             if (!layer || layer.width !== width || layer.height !== height) {
@@ -942,6 +981,7 @@
             const rf = params.filletDepth * (s / 2 + g);
             const W = width, H = height;
 
+            assignBlobColors();
             let defs = '';
             let body = `  <rect width="${W}" height="${H}" fill="${params.paperColor}"/>\n`;
 
