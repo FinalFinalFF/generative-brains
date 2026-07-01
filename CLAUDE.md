@@ -14,7 +14,7 @@ No build, no dependencies. `index.html` is fully self-contained (p5.js from CDN)
 open index.html
 ```
 
-`?seed=N` in the URL loads a specific variation. Same seed + same parameters always reproduces the identical composition. Export via Download PNG (canvas renders at pixelDensity 2, so exports are 2400px wide) or Download SVG — true vector output from `buildSVG()`, which shares `blobGeometry()` with the canvas renderer: cell rects and diagonal necks are exact paths, and fillet cut circles become a per-blob `<mask>` so they cross-cut fillet squares exactly like the canvas erase pass.
+`?seed=N` in the URL loads a specific variation. Same seed + same parameters always reproduces the identical composition. Export via Download PNG (canvas renders at pixelDensity 2, so exports are 2400px wide) or Download SVG — true vector output from `buildSVG()`, which shares `blobGeometry()` with the canvas renderer. Each blob is flattened into a single compound `<path>` (holes included) by boolean ops in paper.js (`blobToSinglePathD`: union ink shapes, subtract cut circles; arcs become beziers). If paper.js fails to load, export falls back to grouped shapes with a per-blob `<mask>`.
 
 ## Architecture
 
