@@ -181,8 +181,8 @@
             text-align: right;
         }
 
-        /* Advanced (collapsed) Section */
-        details.advanced summary {
+        /* Collapsible Sections */
+        details.section summary {
             font-size: 16px;
             font-weight: 600;
             color: var(--anthropic-dark);
@@ -193,22 +193,22 @@
             gap: 8px;
         }
 
-        details.advanced summary::-webkit-details-marker {
+        details.section summary::-webkit-details-marker {
             display: none;
         }
 
-        details.advanced summary::before {
+        details.section summary::before {
             content: '▸';
             color: var(--anthropic-orange);
             font-weight: bold;
             transition: transform 0.15s ease;
         }
 
-        details.advanced[open] summary::before {
+        details.section[open] summary::before {
             transform: rotate(90deg);
         }
 
-        details.advanced .advanced-body {
+        details.section .section-body {
             margin-top: 16px;
         }
 
@@ -357,18 +357,24 @@
 
             <!-- Seed Section -->
             <div class="control-section">
-                <h3>Seed</h3>
+                <details class="section" open>
+                <summary>Seed</summary>
+                <div class="section-body">
                 <input type="number" id="seed-input" class="seed-input" value="12345" onchange="updateSeed()">
                 <div class="seed-controls">
                     <button class="button secondary" onclick="previousSeed()">← Prev</button>
                     <button class="button secondary" onclick="nextSeed()">Next →</button>
                 </div>
                 <button class="button tertiary regen-button" onclick="randomSeedAndUpdate()">↻ Random</button>
+                </div>
+                </details>
             </div>
 
             <!-- Parameters Section -->
             <div class="control-section">
-                <h3>Parameters</h3>
+                <details class="section" open>
+                <summary>Parameters</summary>
+                <div class="section-body">
 
                 <div class="control-group">
                     <label>Columns</label>
@@ -417,14 +423,15 @@
                         <span class="value-display" id="diagonal-value">1.00</span>
                     </div>
                 </div>
-
+                </div>
+                </details>
             </div>
 
             <!-- Advanced Section (tuned constants — collapsed so they stay put) -->
             <div class="control-section">
-                <details class="advanced">
+                <details class="section">
                     <summary>Advanced</summary>
-                    <div class="advanced-body">
+                    <div class="section-body">
                         <div class="control-group">
                             <label>Neck Width</label>
                             <div class="slider-container">
@@ -462,7 +469,9 @@
 
             <!-- Colors Section -->
             <div class="control-section">
-                <h3>Colors</h3>
+                <details class="section">
+                <summary>Colors</summary>
+                <div class="section-body">
 
                 <div class="color-group">
                     <label>Ink</label>
@@ -481,18 +490,25 @@
                 </div>
 
                 <button class="button secondary" onclick="swapColors()">⇄ Swap Ink / Paper</button>
+                </div>
+                </details>
             </div>
 
             <!-- Actions Section -->
             <div class="control-section">
-                <h3>Actions</h3>
+                <details class="section" open>
+                <summary>Actions</summary>
+                <div class="section-body">
                 <div class="button-row">
                     <button class="button" onclick="downloadPNG()">Download PNG</button>
+                    <button class="button" onclick="downloadSVG()">Download SVG</button>
                 </div>
                 <div class="button-row">
                     <button class="button tertiary" onclick="initializeSystem()">Regenerate</button>
                     <button class="button secondary" onclick="resetParameters()">Reset</button>
                 </div>
+                </div>
+                </details>
             </div>
         </div>
 
@@ -677,106 +693,104 @@
             }
 
             for (let id = 1; id <= blobCount; id++) {
+                const geo = blobGeometry(id, s, g, R, rf);
                 layer.clear();
                 layer.noStroke();
                 layer.fill(params.inkColor);
-
-                // Pass 1: this blob's cells as per-corner rounded rects
-                for (let y = 0; y < params.rows; y++) {
-                    for (let x = 0; x < params.cols; x++) {
-                        if (grid[y][x] !== id) continue;
-                        const L = blobAt(x - 1, y) === id, Rt = blobAt(x + 1, y) === id;
-                        const T = blobAt(x, y - 1) === id, B = blobAt(x, y + 1) === id;
-
-                        // fused sides overlap the neighbor by half a pixel to
-                        // avoid antialiasing seams between abutting rects
-                        const x0 = MARGIN + x * s + (L ? -0.5 : g);
-                        const x1 = MARGIN + (x + 1) * s - (Rt ? -0.5 : g);
-                        const y0 = MARGIN + y * s + (T ? -0.5 : g);
-                        const y1 = MARGIN + (y + 1) * s - (B ? -0.5 : g);
-
-                        const rMax = Math.min((x1 - x0) / 2, (y1 - y0) / 2);
-                        const r = Math.min(R, rMax);
-
-                        layer.rect(x0, y0, x1 - x0, y1 - y0,
-                            (!T && !L) ? r : 0,   // top-left
-                            (!T && !Rt) ? r : 0,  // top-right
-                            (!B && !Rt) ? r : 0,  // bottom-right
-                            (!B && !L) ? r : 0);  // bottom-left
-                    }
-                }
-
-                // Pass 1.5: skinny necks between same-blob cells that touch only
-                // diagonally — the classic two-tangent-circle metaball pinch
-                for (let y = 0; y < params.rows; y++) {
-                    for (let x = 0; x < params.cols; x++) {
-                        if (grid[y][x] !== id) continue;
-                        // check the two forward diagonals so each pair draws once
-                        for (const dy of [1, -1]) {
-                            const dxc = x + 1, dyc = y + dy;
-                            if (blobAt(dxc, dyc) !== id) continue;
-                            const b1 = blobAt(x + 1, y), b2 = blobAt(x, y + dy);
-                            if (b1 === id || b2 === id) continue;       // fused via L-bend already
-                            if (b1 !== 0 && b1 === b2) continue;        // would cross another blob's neck
-                            drawNeck(
-                                MARGIN + (x + 0.5) * s, MARGIN + (y + 0.5) * s,
-                                MARGIN + (dxc + 0.5) * s, MARGIN + (dyc + 0.5) * s,
-                                s / 2 - g, params.neckWidth * (s / 2 - g)
-                            );
-                        }
-                    }
-                }
-
-                // Pass 2: concave fillets where a not-this-blob cell's corner is
-                // wrapped by three same-blob neighbors (both orthogonal + diagonal)
-                if (rf > 0) {
-                    const squares = [];
-                    const cuts = [];
-                    for (let y = 0; y < params.rows; y++) {
-                        for (let x = 0; x < params.cols; x++) {
-                            if (grid[y][x] === id) continue;
-                            const corners = [
-                                // [orthoA, orthoB, diagonal, corner point Px/Py, inward direction dx/dy]
-                                [blobAt(x - 1, y), blobAt(x, y - 1), blobAt(x - 1, y - 1), MARGIN + x * s - g,       MARGIN + y * s - g,        1,  1],
-                                [blobAt(x + 1, y), blobAt(x, y - 1), blobAt(x + 1, y - 1), MARGIN + (x + 1) * s + g, MARGIN + y * s - g,       -1,  1],
-                                [blobAt(x + 1, y), blobAt(x, y + 1), blobAt(x + 1, y + 1), MARGIN + (x + 1) * s + g, MARGIN + (y + 1) * s + g, -1, -1],
-                                [blobAt(x - 1, y), blobAt(x, y + 1), blobAt(x - 1, y + 1), MARGIN + x * s - g,       MARGIN + (y + 1) * s + g,  1, -1]
-                            ];
-                            for (const [a, b, d, px, py, dx, dy] of corners) {
-                                if (a === id && b === id && d === id) {
-                                    squares.push([dx > 0 ? px : px - rf, dy > 0 ? py : py - rf]);
-                                    cuts.push([px + dx * rf, py + dy * rf]);
-                                }
-                            }
-                        }
-                    }
-
-                    // ink squares first, then erased cuts — overlapping cuts are
-                    // what form the cusps and breathing holes
-                    for (const [qx, qy] of squares) layer.rect(qx, qy, rf, rf);
-                    layer.erase();
-                    for (const [cx, cy] of cuts) layer.circle(cx, cy, rf * 2);
-                    layer.noErase();
-                }
-
+                for (const rc of geo.rects)
+                    layer.rect(rc.x0, rc.y0, rc.x1 - rc.x0, rc.y1 - rc.y0, rc.r[0], rc.r[1], rc.r[2], rc.r[3]);
+                for (const nk of geo.necks)
+                    drawNeck(nk.p1x, nk.p1y, nk.p2x, nk.p2y, s / 2 - g, params.neckWidth * (s / 2 - g));
+                for (const [qx, qy] of geo.squares) layer.rect(qx, qy, rf, rf);
+                layer.erase();
+                for (const [cx, cy] of geo.cuts) layer.circle(cx, cy, rf * 2);
+                layer.noErase();
                 image(layer, 0, 0, width, height);
             }
         }
 
-        // Draw a metaball neck fusing two circles (radius r, centers p1/p2)
-        // with waist half-width n: an ink quad between the tangent chords, then
-        // two side "fillet circles" (externally tangent to both main circles)
-        // erased out of it. The erase is clipped to the quad so the large fillet
-        // circles cannot nick any other ink on the layer.
-        function drawNeck(p1x, p1y, p2x, p2y, r, n) {
+        // All geometry for one blob: cell rects (with per-corner radii), diagonal
+        // necks, and concave fillets (ink squares + cut circles of radius rf).
+        // Shared by the canvas renderer and the SVG exporter.
+        function blobGeometry(id, s, g, R, rf) {
+            const rects = [], necks = [], squares = [], cuts = [];
+
+            for (let y = 0; y < params.rows; y++) {
+                for (let x = 0; x < params.cols; x++) {
+                    if (grid[y][x] !== id) continue;
+                    const L = blobAt(x - 1, y) === id, Rt = blobAt(x + 1, y) === id;
+                    const T = blobAt(x, y - 1) === id, B = blobAt(x, y + 1) === id;
+
+                    // fused sides overlap the neighbor by half a pixel to
+                    // avoid antialiasing seams between abutting rects
+                    const x0 = MARGIN + x * s + (L ? -0.5 : g);
+                    const x1 = MARGIN + (x + 1) * s - (Rt ? -0.5 : g);
+                    const y0 = MARGIN + y * s + (T ? -0.5 : g);
+                    const y1 = MARGIN + (y + 1) * s - (B ? -0.5 : g);
+
+                    const rMax = Math.min((x1 - x0) / 2, (y1 - y0) / 2);
+                    const r = Math.min(R, rMax);
+
+                    rects.push({x0, y0, x1, y1, r: [
+                        (!T && !L) ? r : 0,   // top-left
+                        (!T && !Rt) ? r : 0,  // top-right
+                        (!B && !Rt) ? r : 0,  // bottom-right
+                        (!B && !L) ? r : 0]});// bottom-left
+
+                    // skinny necks between same-blob cells that touch only
+                    // diagonally — check the two forward diagonals so each
+                    // pair records once
+                    for (const dy of [1, -1]) {
+                        const dxc = x + 1, dyc = y + dy;
+                        if (blobAt(dxc, dyc) !== id) continue;
+                        const b1 = blobAt(x + 1, y), b2 = blobAt(x, y + dy);
+                        if (b1 === id || b2 === id) continue;       // fused via L-bend already
+                        if (b1 !== 0 && b1 === b2) continue;        // would cross another blob's neck
+                        necks.push({
+                            p1x: MARGIN + (x + 0.5) * s, p1y: MARGIN + (y + 0.5) * s,
+                            p2x: MARGIN + (dxc + 0.5) * s, p2y: MARGIN + (dyc + 0.5) * s
+                        });
+                    }
+                }
+            }
+
+            // concave fillets where a not-this-blob cell's corner is wrapped by
+            // three same-blob neighbors (both orthogonal + diagonal)
+            if (rf > 0) {
+                for (let y = 0; y < params.rows; y++) {
+                    for (let x = 0; x < params.cols; x++) {
+                        if (grid[y][x] === id) continue;
+                        const corners = [
+                            // [orthoA, orthoB, diagonal, corner point Px/Py, inward direction dx/dy]
+                            [blobAt(x - 1, y), blobAt(x, y - 1), blobAt(x - 1, y - 1), MARGIN + x * s - g,       MARGIN + y * s - g,        1,  1],
+                            [blobAt(x + 1, y), blobAt(x, y - 1), blobAt(x + 1, y - 1), MARGIN + (x + 1) * s + g, MARGIN + y * s - g,       -1,  1],
+                            [blobAt(x + 1, y), blobAt(x, y + 1), blobAt(x + 1, y + 1), MARGIN + (x + 1) * s + g, MARGIN + (y + 1) * s + g, -1, -1],
+                            [blobAt(x - 1, y), blobAt(x, y + 1), blobAt(x - 1, y + 1), MARGIN + x * s - g,       MARGIN + (y + 1) * s + g,  1, -1]
+                        ];
+                        for (const [a, b, d, px, py, dx, dy] of corners) {
+                            if (a === id && b === id && d === id) {
+                                squares.push([dx > 0 ? px : px - rf, dy > 0 ? py : py - rf]);
+                                cuts.push([px + dx * rf, py + dy * rf]);
+                            }
+                        }
+                    }
+                }
+            }
+
+            return {rects, necks, squares, cuts};
+        }
+
+        // The metaball neck between two circles (radius r, centers p1/p2) with
+        // waist half-width n: quad corners are the tangent points between the
+        // main circles and two side "fillet circles" externally tangent to both.
+        function neckGeometry(p1x, p1y, p2x, p2y, r, n) {
             n = Math.min(n, r * 0.9);
             const d = Math.hypot(p2x - p1x, p2y - p1y);
-            const ux = (p2x - p1x) / d, uy = (p2y - p1y) / d; // axis
-            const vx = -uy, vy = ux;                          // perpendicular
+            const vx = -(p2y - p1y) / d, vy = (p2x - p1x) / d; // perpendicular
             // fillet radius that produces the requested waist
             const q = (d * d / 4 + n * n - r * r) / (2 * (r - n));
-            if (q <= 0) return; // circles already overlap
-            const h = n + q;    // fillet center height above the midpoint
+            if (q <= 0) return null; // circles already overlap
+            const h = n + q;         // fillet center height above the midpoint
             const mx = (p1x + p2x) / 2, my = (p1y + p2y) / 2;
 
             const pts = [];   // quad corners: T1+, T2+, T2-, T1-
@@ -789,6 +803,16 @@
                 const t2 = [p2x + (fx - p2x) * t, p2y + (fy - p2y) * t];
                 if (sgn === 1) pts.push(t1, t2); else pts.push(t2, t1);
             }
+            return {pts, fills, q};
+        }
+
+        // Canvas version: ink quad, then the fillet circles erased out of it.
+        // The erase is clipped to the quad so the large fillet circles cannot
+        // nick any other ink on the layer.
+        function drawNeck(p1x, p1y, p2x, p2y, r, n) {
+            const nk = neckGeometry(p1x, p1y, p2x, p2y, r, n);
+            if (!nk) return;
+            const {pts, fills, q} = nk;
 
             layer.fill(params.inkColor);
             layer.quad(pts[0][0], pts[0][1], pts[1][0], pts[1][1],
@@ -806,6 +830,96 @@
             layer.noErase();
             ctx.restore();
             layer.fill(params.inkColor); // erase() clobbers fill state
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // SVG EXPORT — same geometry as the canvas, as clean vector paths.
+        // Necks become exact paths (arc-sided bridges); fillet cuts become a
+        // per-blob mask so they can cross-cut squares exactly like the canvas.
+        // ═══════════════════════════════════════════════════════════════════════
+
+        const fmt = n => String(Math.round(n * 100) / 100);
+
+        function svgCellPath(rc) {
+            const {x0, y0, x1, y1, r} = rc;
+            const [tl, tr, br, bl] = r;
+            let d = `M ${fmt(x0 + tl)} ${fmt(y0)} L ${fmt(x1 - tr)} ${fmt(y0)} `;
+            if (tr) d += `A ${fmt(tr)} ${fmt(tr)} 0 0 1 ${fmt(x1)} ${fmt(y0 + tr)} `;
+            d += `L ${fmt(x1)} ${fmt(y1 - br)} `;
+            if (br) d += `A ${fmt(br)} ${fmt(br)} 0 0 1 ${fmt(x1 - br)} ${fmt(y1)} `;
+            d += `L ${fmt(x0 + bl)} ${fmt(y1)} `;
+            if (bl) d += `A ${fmt(bl)} ${fmt(bl)} 0 0 1 ${fmt(x0)} ${fmt(y1 - bl)} `;
+            d += `L ${fmt(x0)} ${fmt(y0 + tl)} `;
+            if (tl) d += `A ${fmt(tl)} ${fmt(tl)} 0 0 1 ${fmt(x0 + tl)} ${fmt(y0)} `;
+            return `<path d="${d}Z"/>`;
+        }
+
+        // minor arc from -> to around center (cx, cy), radius r
+        function svgArc(cx, cy, r, from, to) {
+            let delta = Math.atan2(to[1] - cy, to[0] - cx) - Math.atan2(from[1] - cy, from[0] - cx);
+            while (delta > Math.PI) delta -= 2 * Math.PI;
+            while (delta < -Math.PI) delta += 2 * Math.PI;
+            return `A ${fmt(r)} ${fmt(r)} 0 0 ${delta > 0 ? 1 : 0} ${fmt(to[0])} ${fmt(to[1])} `;
+        }
+
+        function svgNeckPath(nk) {
+            const geo = neckGeometry(nk.p1x, nk.p1y, nk.p2x, nk.p2y,
+                cellSize / 2 - params.gap * cellSize * 0.5,
+                params.neckWidth * (cellSize / 2 - params.gap * cellSize * 0.5));
+            if (!geo) return '';
+            const {pts, fills, q} = geo; // pts: T1+, T2+, T2-, T1-
+            let d = `M ${fmt(pts[0][0])} ${fmt(pts[0][1])} `;
+            d += svgArc(fills[0][0], fills[0][1], q, pts[0], pts[1]);
+            d += `L ${fmt(pts[2][0])} ${fmt(pts[2][1])} `;
+            d += svgArc(fills[1][0], fills[1][1], q, pts[2], pts[3]);
+            return `<path d="${d}Z"/>`;
+        }
+
+        function buildSVG() {
+            const s = cellSize;
+            const g = params.gap * s * 0.5;
+            const R = params.roundness * (s / 2 - g);
+            const rf = params.filletDepth * (s / 2 + g);
+            const W = width, H = height;
+
+            let defs = '';
+            let body = `  <rect width="${W}" height="${H}" fill="${params.paperColor}"/>\n`;
+
+            for (let id = 1; id <= blobCount; id++) {
+                const geo = blobGeometry(id, s, g, R, rf);
+                if (!geo.rects.length) continue;
+                const shapes = [
+                    ...geo.rects.map(svgCellPath),
+                    ...geo.necks.map(svgNeckPath),
+                    ...geo.squares.map(([qx, qy]) =>
+                        `<rect x="${fmt(qx)}" y="${fmt(qy)}" width="${fmt(rf)}" height="${fmt(rf)}"/>`)
+                ].filter(Boolean);
+
+                let maskAttr = '';
+                if (geo.cuts.length) {
+                    defs += `    <mask id="cut${id}" maskUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}">` +
+                        `<rect width="${W}" height="${H}" fill="white"/>` +
+                        geo.cuts.map(([cx, cy]) =>
+                            `<circle cx="${fmt(cx)}" cy="${fmt(cy)}" r="${fmt(rf)}" fill="black"/>`).join('') +
+                        `</mask>\n`;
+                    maskAttr = ` mask="url(#cut${id})"`;
+                }
+                body += `  <g fill="${params.inkColor}"${maskAttr}>\n    ` +
+                    shapes.join('\n    ') + `\n  </g>\n`;
+            }
+
+            return `<?xml version="1.0" encoding="UTF-8"?>\n` +
+                `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">\n` +
+                (defs ? `  <defs>\n${defs}  </defs>\n` : '') + body + `</svg>\n`;
+        }
+
+        function downloadSVG() {
+            const blob = new Blob([buildSVG()], {type: 'image/svg+xml'});
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'generative-brain-seed-' + params.seed + '.svg';
+            a.click();
+            URL.revokeObjectURL(a.href);
         }
 
         // ═══════════════════════════════════════════════════════════════════════
