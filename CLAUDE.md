@@ -30,8 +30,6 @@ Everything lives in the inline `<script>` of `index.html`, in two stages:
 
 The per-blob layering (not a single canvas) is required: fillet cuts would otherwise erase the ink of a different object sitting in the wrapped cell — e.g., a dot nested in another blob's notch.
 
-**3. Animation** — all motion is real geometry, never opacity. Style params (`styleParams`) ease via `startTween`; structural changes go through `transitionRebuild`, which captures old/new states (`captureState`) and morphs by growth order: `applyState(state, f)` includes only each blob's first `round(f × size)` cells, so the old composition retracts along its own growth path before the new one grows in. Color maps are frozen per state during morphs so adjacency-based coloring can't flicker. The Breathe LFO drifts the four style params and moves the slider knobs live. Offscreen layers drop to pixelDensity 1 while animating; a final full-res render happens on settle.
-
 Key geometry: arm width = `s − 2g`; max convex radius `R = s/2 − g`; max fillet radius `rf = s/2 + g` (at which enclosed single-cell holes become perfect circles — the default 0.65 gives concave-diamond holes).
 
 ## Conventions
