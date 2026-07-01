@@ -14,7 +14,7 @@ No build, no dependencies. `index.html` is fully self-contained (p5.js from CDN)
 open index.html
 ```
 
-`?seed=N` in the URL loads a specific variation. Same seed + same parameters always reproduces the identical composition. Export via the Download PNG button (canvas renders at pixelDensity 2, so exports are 2400px wide).
+`?seed=N` in the URL loads a specific variation. Same seed + same parameters always reproduces the identical composition. Export via Download PNG (canvas renders at pixelDensity 2, so exports are 2400px wide) or Download SVG — true vector output from `buildSVG()`, which shares `blobGeometry()` with the canvas renderer: cell rects and diagonal necks are exact paths, and fillet cut circles become a per-blob `<mask>` so they cross-cut fillet squares exactly like the canvas erase pass.
 
 ## Architecture
 
