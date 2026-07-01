@@ -212,6 +212,33 @@
             margin-top: 16px;
         }
 
+        /* Palette Swatches */
+        .swatches {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .swatch {
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            border: 1px solid var(--anthropic-light-gray);
+            box-sizing: border-box;
+            transition: transform 0.1s ease;
+        }
+
+        .swatch:hover {
+            transform: scale(1.1);
+        }
+
+        .swatch.selected {
+            border: 2px solid var(--anthropic-orange);
+            box-shadow: 0 0 0 2px white inset;
+        }
+
         /* Color Pickers */
         .color-group {
             margin-bottom: 16px;
@@ -474,7 +501,20 @@
                 <div class="section-body">
 
                 <div class="color-group">
-                    <label>Ink</label>
+                    <label>Palette — select one or more, blobs mix randomly</label>
+                    <div class="swatches" id="swatches">
+                        <div class="swatch" data-color="#00274C" style="background:#00274C" onclick="toggleSwatch(this.dataset.color)" title="UM Blue"></div>
+                        <div class="swatch" data-color="#FFCB05" style="background:#FFCB05" onclick="toggleSwatch(this.dataset.color)" title="Maize"></div>
+                        <div class="swatch" data-color="#8BACF4" style="background:#8BACF4" onclick="toggleSwatch(this.dataset.color)" title="Periwinkle"></div>
+                        <div class="swatch" data-color="#DCE4FA" style="background:#DCE4FA" onclick="toggleSwatch(this.dataset.color)" title="Ice"></div>
+                        <div class="swatch" data-color="#CC753F" style="background:#CC753F" onclick="toggleSwatch(this.dataset.color)" title="Terracotta"></div>
+                        <div class="swatch" data-color="#F1EDE9" style="background:#F1EDE9" onclick="toggleSwatch(this.dataset.color)" title="Bone"></div>
+                        <div class="swatch" data-color="#000000" style="background:#000000" onclick="toggleSwatch(this.dataset.color)" title="Black"></div>
+                    </div>
+                </div>
+
+                <div class="color-group">
+                    <label>Ink (when no palette selected)</label>
                     <div class="color-picker-container">
                         <input type="color" id="inkColor" value="#000000" onchange="updateColor('inkColor', this.value)">
                         <span class="color-value" id="inkColor-value">#000000</span>
@@ -537,6 +577,7 @@
             gap: 0.10,           // synaptic cleft, as a fraction of cell size
             roundness: 1.0,      // convex corner radius factor (1 = full circles)
             filletDepth: 1.0,    // concave fillet radius factor (1 = full metaball cusps)
+            palette: [],         // selected swatch colors; blobs pick per-blob when non-empty
             inkColor: '#000000',
             paperColor: '#ffffff'
         };
@@ -545,7 +586,7 @@
         const urlSeed = parseInt(new URLSearchParams(window.location.search).get('seed'));
         if (urlSeed > 0) params.seed = urlSeed;
 
-        let defaultParams = {...params, seed: 12345};
+        let defaultParams = {...params, seed: 12345, palette: [...params.palette]};
 
         // ═══════════════════════════════════════════════════════════════════════
         // ALGORITHM
@@ -578,6 +619,7 @@
         const MARGIN = 48;
 
         let grid = [];        // 0 = empty, otherwise blob id
+        let blobHue = [];     // per-blob random unit value, fixed at growth time
         let blobCount = 0;
         let cellSize = 0;
         let layer = null;     // offscreen buffer, reused for every blob
@@ -637,6 +679,7 @@
 
         function buildGrid() {
             grid = Array.from({length: params.rows}, () => new Array(params.cols).fill(0));
+            blobHue = [0];
             blobCount = 0;
             const target = Math.round(params.density * params.cols * params.rows);
             let occupied = 0;
@@ -674,8 +717,14 @@
                     grid[ny][nx] = id;
                     cells.push([nx, ny]);
                 }
+                blobHue[id] = random(); // reserved per blob for palette assignment
                 occupied += cells.length;
             }
+        }
+
+        function blobColor(id) {
+            const pal = params.palette.length ? params.palette : [params.inkColor];
+            return pal[Math.floor(blobHue[id] * pal.length) % pal.length];
         }
 
         function render() {
@@ -694,13 +743,14 @@
 
             for (let id = 1; id <= blobCount; id++) {
                 const geo = blobGeometry(id, s, g, R, rf);
+                const ink = blobColor(id);
                 layer.clear();
                 layer.noStroke();
-                layer.fill(params.inkColor);
+                layer.fill(ink);
                 for (const rc of geo.rects)
                     layer.rect(rc.x0, rc.y0, rc.x1 - rc.x0, rc.y1 - rc.y0, rc.r[0], rc.r[1], rc.r[2], rc.r[3]);
                 for (const nk of geo.necks)
-                    drawNeck(nk.p1x, nk.p1y, nk.p2x, nk.p2y, s / 2 - g, params.neckWidth * (s / 2 - g));
+                    drawNeck(nk.p1x, nk.p1y, nk.p2x, nk.p2y, s / 2 - g, params.neckWidth * (s / 2 - g), ink);
                 for (const [qx, qy] of geo.squares) layer.rect(qx, qy, rf, rf);
                 layer.erase();
                 for (const [cx, cy] of geo.cuts) layer.circle(cx, cy, rf * 2);
@@ -809,12 +859,12 @@
         // Canvas version: ink quad, then the fillet circles erased out of it.
         // The erase is clipped to the quad so the large fillet circles cannot
         // nick any other ink on the layer.
-        function drawNeck(p1x, p1y, p2x, p2y, r, n) {
+        function drawNeck(p1x, p1y, p2x, p2y, r, n, ink) {
             const nk = neckGeometry(p1x, p1y, p2x, p2y, r, n);
             if (!nk) return;
             const {pts, fills, q} = nk;
 
-            layer.fill(params.inkColor);
+            layer.fill(ink);
             layer.quad(pts[0][0], pts[0][1], pts[1][0], pts[1][1],
                        pts[2][0], pts[2][1], pts[3][0], pts[3][1]);
 
@@ -829,7 +879,7 @@
             for (const [fx, fy] of fills) layer.circle(fx, fy, q * 2);
             layer.noErase();
             ctx.restore();
-            layer.fill(params.inkColor); // erase() clobbers fill state
+            layer.fill(ink); // erase() clobbers fill state
         }
 
         // ═══════════════════════════════════════════════════════════════════════
@@ -904,7 +954,7 @@
                         `</mask>\n`;
                     maskAttr = ` mask="url(#cut${id})"`;
                 }
-                body += `  <g fill="${params.inkColor}"${maskAttr}>\n    ` +
+                body += `  <g fill="${blobColor(id)}"${maskAttr}>\n    ` +
                     shapes.join('\n    ') + `\n  </g>\n`;
             }
 
@@ -940,6 +990,19 @@
             params[name] = value;
             document.getElementById(name + '-value').textContent = value;
             render();
+        }
+
+        function toggleSwatch(c) {
+            const i = params.palette.indexOf(c);
+            if (i >= 0) params.palette.splice(i, 1); else params.palette.push(c);
+            renderSwatches();
+            render();
+        }
+
+        function renderSwatches() {
+            document.querySelectorAll('#swatches .swatch').forEach(el => {
+                el.classList.toggle('selected', params.palette.includes(el.dataset.color));
+            });
         }
 
         function swapColors() {
@@ -999,7 +1062,8 @@
         }
 
         function resetParameters() {
-            params = {...defaultParams};
+            params = {...defaultParams, palette: [...defaultParams.palette]};
+            renderSwatches();
 
             for (const name of ['cols', 'rows', 'density', 'blobSize', 'snakiness', 'diagonal', 'neckWidth', 'gap', 'roundness', 'filletDepth']) {
                 document.getElementById(name).value = params[name];
