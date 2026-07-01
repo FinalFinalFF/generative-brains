@@ -647,13 +647,14 @@
         const MARGIN = 48;
 
         let grid = [];        // 0 = empty, otherwise blob id
+        let blobCells = [];   // per-blob cell list in growth order (drives morphing)
         let blobHue = [];     // per-blob random unit value, fixed at growth time
         let blobCount = 0;
         let cellSize = 0;
         let layer = null;     // offscreen buffer, reused for every blob
         let layerPD = 2;      // layer pixel density (dropped to 1 while animating)
         let tweenAnim = null; // {from, to, t0, dur} easing style params
-        let fadeAnim = null;  // {img, t0, dur} crossfade after structural changes
+        let morphAnim = null; // {oldState, newState, t0, dur} grid-to-grid shape morph
         let lfo = {on: false, base: null, t: 0, last: 0}; // "Breathe" oscillator
         let animSpeed = 1;
         const styleParams = ['gap', 'roundness', 'filletDepth', 'neckWidth'];
@@ -699,9 +700,22 @@
             const now = millis();
             let active = false;
 
+            if (morphAnim) {
+                const k = Math.min(1, (now - morphAnim.t0) / morphAnim.dur);
+                const RETRACT = 0.4; // fraction of the morph spent retracting
+                if (k >= 1) {
+                    applyState(morphAnim.newState, 1);
+                    morphAnim = null;
+                } else {
+                    if (k < RETRACT) applyState(morphAnim.oldState, 1 - easeInOut(k / RETRACT));
+                    else applyState(morphAnim.newState, easeInOut((k - RETRACT) / (1 - RETRACT)));
+                    active = true;
+                }
+            }
+
             if (tweenAnim) {
                 const k = Math.min(1, (now - tweenAnim.t0) / tweenAnim.dur);
-                const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; // easeInOutQuad
+                const e = easeInOut(k);
                 for (const key in tweenAnim.to) {
                     params[key] = tweenAnim.from[key] + (tweenAnim.to[key] - tweenAnim.from[key]) * e;
                     syncSliderUI(key);
@@ -723,12 +737,51 @@
             }
 
             render();
-            if (fadeAnim) active = true; // render() clears it when the fade completes
 
             if (!active) {
                 noLoop();
                 render(); // final pass at full resolution
             }
+        }
+
+        // Snapshot everything render() needs, so a morph can replay either the
+        // outgoing or incoming composition at any growth fraction.
+        function captureState() {
+            return {
+                rows: grid.length,
+                cols: grid[0].length,
+                cellSize: cellSize,
+                canvasH: Math.round(grid.length * cellSize + 2 * MARGIN),
+                blobCells: blobCells.map(c => c && c.map(pt => [pt[0], pt[1]])),
+                blobHue: [...blobHue],
+                blobCount: blobCount,
+                colorMap: [...blobColorMap]
+            };
+        }
+
+        // Rebuild the render globals from a state at growth fraction f:
+        // each blob keeps only its first round(f * size) cells, so blobs
+        // retract or grow along their actual growth order.
+        function applyState(st, f) {
+            params.cols = st.cols;
+            params.rows = st.rows;
+            cellSize = st.cellSize;
+            if (height !== st.canvasH) resizeCanvas(CANVAS_W, st.canvasH);
+            blobCount = st.blobCount;
+            blobHue = st.blobHue;
+            blobCells = st.blobCells;
+            blobColorMap = st.colorMap;
+            grid = Array.from({length: st.rows}, () => new Array(st.cols).fill(0));
+            for (let id = 1; id <= st.blobCount; id++) {
+                const cells = st.blobCells[id];
+                if (!cells) continue;
+                const n = Math.round(f * cells.length);
+                for (let i = 0; i < n; i++) grid[cells[i][1]][cells[i][0]] = id;
+            }
+        }
+
+        function easeInOut(k) {
+            return k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
         }
 
         function startTween(changes) {
@@ -740,10 +793,23 @@
             loop();
         }
 
-        // snapshot the canvas, rebuild with new settings, dissolve between them
+        // Morph to the regenerated composition: the old blobs retract along
+        // their growth order, then the new blobs grow in. Real geometry the
+        // whole way — no opacity blending.
         function transitionRebuild() {
-            fadeAnim = {img: get(), t0: millis(), dur: 450};
-            initializeSystem();
+            if (morphAnim) { applyState(morphAnim.newState, 1); morphAnim = null; }
+            assignBlobColors();
+            const oldState = captureState();
+
+            randomSeed(params.seed);
+            noiseSeed(params.seed);
+            cellSize = (CANVAS_W - 2 * MARGIN) / params.cols;
+            buildGrid();
+            assignBlobColors();
+            const newState = captureState();
+
+            morphAnim = {oldState, newState, t0: millis(), dur: 900};
+            applyState(oldState, 1);
             loop();
         }
 
@@ -785,6 +851,7 @@
 
         function buildGrid() {
             grid = Array.from({length: params.rows}, () => new Array(params.cols).fill(0));
+            blobCells = [null];
             blobHue = [0];
             blobCount = 0;
             const target = Math.round(params.density * params.cols * params.rows);
@@ -824,6 +891,7 @@
                     cells.push([nx, ny]);
                 }
                 blobHue[id] = random(); // reserved per blob for palette assignment
+                blobCells[id] = cells;
                 occupied += cells.length;
             }
         }
@@ -877,10 +945,10 @@
             const R = params.roundness * (s / 2 - g); // convex corner radius (= half arm width at 1.0)
             const rf = params.filletDepth * (s / 2 + g); // concave fillet radius
 
-            assignBlobColors();
+            if (!morphAnim) assignBlobColors(); // frozen per-state during morphs
             background(params.paperColor);
 
-            const pd = (tweenAnim || lfo.on) ? 1 : 2;
+            const pd = (tweenAnim || lfo.on || morphAnim) ? 1 : 2;
             if (!layer || layer.width !== width || layer.height !== height || layerPD !== pd) {
                 if (layer) layer.remove();
                 layer = createGraphics(width, height);
@@ -903,18 +971,6 @@
                 for (const [cx, cy] of geo.cuts) layer.circle(cx, cy, rf * 2);
                 layer.noErase();
                 image(layer, 0, 0, width, height);
-            }
-
-            if (fadeAnim) {
-                const k = (millis() - fadeAnim.t0) / fadeAnim.dur;
-                if (k < 1) {
-                    push();
-                    tint(255, 255 * (1 - k));
-                    image(fadeAnim.img, 0, 0, width, height);
-                    pop();
-                } else {
-                    fadeAnim = null;
-                }
             }
         }
 
@@ -1176,13 +1232,10 @@
             document.getElementById(name + '-value').textContent =
                 intParams.includes(name) ? v : v.toFixed(2);
             if (styleParams.includes(name)) {
-                startTween({[name]: v});       // geometry morphs smoothly
-            } else if (name === 'cols' || name === 'rows') {
-                params[name] = v;
-                initializeSystem();            // canvas resizes — no fade
+                startTween({[name]: v});   // geometry morphs smoothly
             } else {
                 params[name] = v;
-                transitionRebuild();           // new grid — dissolve
+                transitionRebuild();       // retract old grid, grow new one
             }
         }
 
@@ -1281,7 +1334,7 @@
         function resetParameters() {
             lfo.on = false;
             tweenAnim = null;
-            fadeAnim = null;
+            morphAnim = null;
             const bb = document.getElementById('breathe-btn');
             if (bb) bb.textContent = '▶ Breathe';
             params = {...defaultParams, palette: [...defaultParams.palette]};
