@@ -523,6 +523,16 @@
 
                 <div class="color-group">
                     <label>Paper</label>
+                    <div class="swatches" id="paper-swatches">
+                        <div class="swatch" data-color="#FFFFFF" style="background:#FFFFFF" onclick="setPaperSwatch(this.dataset.color)" title="White"></div>
+                        <div class="swatch" data-color="#00274C" style="background:#00274C" onclick="setPaperSwatch(this.dataset.color)" title="UM Blue"></div>
+                        <div class="swatch" data-color="#FFCB05" style="background:#FFCB05" onclick="setPaperSwatch(this.dataset.color)" title="Maize"></div>
+                        <div class="swatch" data-color="#8BACF4" style="background:#8BACF4" onclick="setPaperSwatch(this.dataset.color)" title="Periwinkle"></div>
+                        <div class="swatch" data-color="#DCE4FA" style="background:#DCE4FA" onclick="setPaperSwatch(this.dataset.color)" title="Ice"></div>
+                        <div class="swatch" data-color="#CC753F" style="background:#CC753F" onclick="setPaperSwatch(this.dataset.color)" title="Terracotta"></div>
+                        <div class="swatch" data-color="#F1EDE9" style="background:#F1EDE9" onclick="setPaperSwatch(this.dataset.color)" title="Bone"></div>
+                        <div class="swatch" data-color="#000000" style="background:#000000" onclick="setPaperSwatch(this.dataset.color)" title="Black"></div>
+                    </div>
                     <div class="color-picker-container">
                         <input type="color" id="paperColor" value="#ffffff" onchange="updateColor('paperColor', this.value)">
                         <span class="color-value" id="paperColor-value">#ffffff</span>
@@ -989,6 +999,7 @@
         function updateColor(name, value) {
             params[name] = value;
             document.getElementById(name + '-value').textContent = value;
+            renderPaperSwatches();
             render();
         }
 
@@ -1005,11 +1016,27 @@
             });
         }
 
+        function setPaperSwatch(c) {
+            params.paperColor = c;
+            document.getElementById('paperColor').value = c;
+            document.getElementById('paperColor-value').textContent = c;
+            renderPaperSwatches();
+            render();
+        }
+
+        function renderPaperSwatches() {
+            document.querySelectorAll('#paper-swatches .swatch').forEach(el => {
+                el.classList.toggle('selected',
+                    el.dataset.color.toLowerCase() === params.paperColor.toLowerCase());
+            });
+        }
+
         function swapColors() {
             const ink = params.inkColor;
             params.inkColor = params.paperColor;
             params.paperColor = ink;
             syncColorUI();
+            renderPaperSwatches();
             render();
         }
 
@@ -1064,6 +1091,7 @@
         function resetParameters() {
             params = {...defaultParams, palette: [...defaultParams.palette]};
             renderSwatches();
+            renderPaperSwatches();
 
             for (const name of ['cols', 'rows', 'density', 'blobSize', 'snakiness', 'diagonal', 'neckWidth', 'gap', 'roundness', 'filletDepth']) {
                 document.getElementById(name).value = params[name];
@@ -1078,6 +1106,7 @@
         // Initialize UI on load
         window.addEventListener('load', function() {
             updateSeedDisplay();
+            renderPaperSwatches();
         });
     </script>
 </body>
