@@ -382,8 +382,8 @@
                 <div class="control-group">
                     <label>Diagonals</label>
                     <div class="slider-container">
-                        <input type="range" id="diagonal" min="0" max="1" step="0.05" value="0.3" oninput="updateParam('diagonal', this.value)">
-                        <span class="value-display" id="diagonal-value">0.30</span>
+                        <input type="range" id="diagonal" min="0" max="1" step="0.05" value="1" oninput="updateParam('diagonal', this.value)">
+                        <span class="value-display" id="diagonal-value">1.00</span>
                     </div>
                 </div>
 
@@ -398,8 +398,8 @@
                 <div class="control-group">
                     <label>Gap</label>
                     <div class="slider-container">
-                        <input type="range" id="gap" min="0" max="0.3" step="0.01" value="0.12" oninput="updateParam('gap', this.value)">
-                        <span class="value-display" id="gap-value">0.12</span>
+                        <input type="range" id="gap" min="0" max="0.3" step="0.01" value="0.1" oninput="updateParam('gap', this.value)">
+                        <span class="value-display" id="gap-value">0.10</span>
                     </div>
                 </div>
 
@@ -476,9 +476,9 @@
             density: 0.72,       // target fraction of cells occupied by blobs
             blobSize: 8,         // max cells per blob (sizes are uniform 1..blobSize)
             snakiness: 0.65,     // growth from the walk tip (snaky) vs anywhere on the blob (clumpy)
-            diagonal: 0.3,       // probability of a growth step moving diagonally (skinny neck fusion)
+            diagonal: 1.0,       // probability of a growth step moving diagonally (skinny neck fusion)
             neckWidth: 0.35,     // diagonal neck waist, as a fraction of the circle radius
-            gap: 0.12,           // synaptic cleft, as a fraction of cell size
+            gap: 0.10,           // synaptic cleft, as a fraction of cell size
             roundness: 1.0,      // convex corner radius factor (1 = full circles)
             filletDepth: 1.0,    // concave fillet radius factor (1 = full metaball cusps)
             inkColor: '#000000',
