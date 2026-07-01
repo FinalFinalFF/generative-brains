@@ -181,6 +181,37 @@
             text-align: right;
         }
 
+        /* Advanced (collapsed) Section */
+        details.advanced summary {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--anthropic-dark);
+            cursor: pointer;
+            list-style: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        details.advanced summary::-webkit-details-marker {
+            display: none;
+        }
+
+        details.advanced summary::before {
+            content: '▸';
+            color: var(--anthropic-orange);
+            font-weight: bold;
+            transition: transform 0.15s ease;
+        }
+
+        details.advanced[open] summary::before {
+            transform: rotate(90deg);
+        }
+
+        details.advanced .advanced-body {
+            margin-top: 16px;
+        }
+
         /* Color Pickers */
         .color-group {
             margin-bottom: 16px;
@@ -387,37 +418,46 @@
                     </div>
                 </div>
 
-                <div class="control-group">
-                    <label>Neck Width</label>
-                    <div class="slider-container">
-                        <input type="range" id="neckWidth" min="0.1" max="0.8" step="0.05" value="0.35" oninput="updateParam('neckWidth', this.value)">
-                        <span class="value-display" id="neckWidth-value">0.35</span>
-                    </div>
-                </div>
+            </div>
 
-                <div class="control-group">
-                    <label>Gap</label>
-                    <div class="slider-container">
-                        <input type="range" id="gap" min="0" max="0.3" step="0.01" value="0.1" oninput="updateParam('gap', this.value)">
-                        <span class="value-display" id="gap-value">0.10</span>
-                    </div>
-                </div>
+            <!-- Advanced Section (tuned constants — collapsed so they stay put) -->
+            <div class="control-section">
+                <details class="advanced">
+                    <summary>Advanced</summary>
+                    <div class="advanced-body">
+                        <div class="control-group">
+                            <label>Neck Width</label>
+                            <div class="slider-container">
+                                <input type="range" id="neckWidth" min="0.1" max="0.8" step="0.05" value="0.35" oninput="updateParam('neckWidth', this.value)">
+                                <span class="value-display" id="neckWidth-value">0.35</span>
+                            </div>
+                        </div>
 
-                <div class="control-group">
-                    <label>Roundness</label>
-                    <div class="slider-container">
-                        <input type="range" id="roundness" min="0" max="1" step="0.05" value="1" oninput="updateParam('roundness', this.value)">
-                        <span class="value-display" id="roundness-value">1.00</span>
-                    </div>
-                </div>
+                        <div class="control-group">
+                            <label>Gap</label>
+                            <div class="slider-container">
+                                <input type="range" id="gap" min="0" max="0.3" step="0.01" value="0.1" oninput="updateParam('gap', this.value)">
+                                <span class="value-display" id="gap-value">0.10</span>
+                            </div>
+                        </div>
 
-                <div class="control-group">
-                    <label>Fillet Depth</label>
-                    <div class="slider-container">
-                        <input type="range" id="filletDepth" min="0" max="1" step="0.05" value="1" oninput="updateParam('filletDepth', this.value)">
-                        <span class="value-display" id="filletDepth-value">1.00</span>
+                        <div class="control-group">
+                            <label>Roundness</label>
+                            <div class="slider-container">
+                                <input type="range" id="roundness" min="0" max="1" step="0.05" value="1" oninput="updateParam('roundness', this.value)">
+                                <span class="value-display" id="roundness-value">1.00</span>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <label>Fillet Depth</label>
+                            <div class="slider-container">
+                                <input type="range" id="filletDepth" min="0" max="1" step="0.05" value="1" oninput="updateParam('filletDepth', this.value)">
+                                <span class="value-display" id="filletDepth-value">1.00</span>
+                            </div>
+                        </div>
                     </div>
-                </div>
+                </details>
             </div>
 
             <!-- Colors Section -->
