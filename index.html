@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Generative Brains — Synaptic Tessellation</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paper.js/0.12.17/paper-core.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
@@ -800,7 +801,7 @@
                     layer.rect(rc.x0, rc.y0, rc.x1 - rc.x0, rc.y1 - rc.y0, rc.r[0], rc.r[1], rc.r[2], rc.r[3]);
                 for (const nk of geo.necks)
                     drawNeck(nk.p1x, nk.p1y, nk.p2x, nk.p2y, s / 2 - g, params.neckWidth * (s / 2 - g), ink);
-                for (const [qx, qy] of geo.squares) layer.rect(qx, qy, rf, rf);
+                for (const q of geo.squares) layer.rect(q.x, q.y, q.w, q.h);
                 layer.erase();
                 for (const [cx, cy] of geo.cuts) layer.circle(cx, cy, rf * 2);
                 layer.noErase();
@@ -868,7 +869,11 @@
                         ];
                         for (const [a, b, d, px, py, dx, dy] of corners) {
                             if (a === id && b === id && d === id) {
-                                squares.push([dx > 0 ? px : px - rf, dy > 0 ? py : py - rf]);
+                                squares.push({
+                                    x: dx > 0 ? px - 0.5 : px - rf,
+                                    y: dy > 0 ? py - 0.5 : py - rf,
+                                    w: rf + 0.5, h: rf + 0.5
+                                });
                                 cuts.push([px + dx * rf, py + dy * rf]);
                             }
                         }
@@ -950,7 +955,7 @@
             if (bl) d += `A ${fmt(bl)} ${fmt(bl)} 0 0 1 ${fmt(x0)} ${fmt(y1 - bl)} `;
             d += `L ${fmt(x0)} ${fmt(y0 + tl)} `;
             if (tl) d += `A ${fmt(tl)} ${fmt(tl)} 0 0 1 ${fmt(x0 + tl)} ${fmt(y0)} `;
-            return `<path d="${d}Z"/>`;
+            return d + 'Z';
         }
 
         // minor arc from -> to around center (cx, cy), radius r
@@ -971,7 +976,26 @@
             d += svgArc(fills[0][0], fills[0][1], q, pts[0], pts[1]);
             d += `L ${fmt(pts[2][0])} ${fmt(pts[2][1])} `;
             d += svgArc(fills[1][0], fills[1][1], q, pts[2], pts[3]);
-            return `<path d="${d}Z"/>`;
+            return d + 'Z';
+        }
+
+        // Flatten one blob into a single compound path: union all ink shapes,
+        // subtract the union of cut circles. Arcs become bezier curves.
+        function blobToSinglePathD(dStrings, cuts, rf) {
+            let ink = null;
+            for (const d of dStrings) {
+                const path = new paper.Path(d);
+                ink = ink ? ink.unite(path, {insert: false}) : path;
+            }
+            let holes = null;
+            for (const [cx, cy] of cuts) {
+                const c = new paper.Path.Circle(new paper.Point(cx, cy), rf);
+                holes = holes ? holes.unite(c, {insert: false}) : c;
+            }
+            const result = holes ? ink.subtract(holes, {insert: false}) : ink;
+            const out = result.pathData;
+            paper.project.clear();
+            return out;
         }
 
         function buildSVG() {
@@ -985,16 +1009,26 @@
             let defs = '';
             let body = `  <rect width="${W}" height="${H}" fill="${params.paperColor}"/>\n`;
 
+            const flatten = typeof paper !== 'undefined';
+            if (flatten && !paper.project) paper.setup(document.createElement('canvas'));
+
             for (let id = 1; id <= blobCount; id++) {
                 const geo = blobGeometry(id, s, g, R, rf);
                 if (!geo.rects.length) continue;
-                const shapes = [
+                const dStrings = [
                     ...geo.rects.map(svgCellPath),
-                    ...geo.necks.map(svgNeckPath),
-                    ...geo.squares.map(([qx, qy]) =>
-                        `<rect x="${fmt(qx)}" y="${fmt(qy)}" width="${fmt(rf)}" height="${fmt(rf)}"/>`)
-                ].filter(Boolean);
+                    ...geo.necks.map(svgNeckPath).filter(Boolean),
+                    ...geo.squares.map(q =>
+                        `M ${fmt(q.x)} ${fmt(q.y)} h ${fmt(q.w)} v ${fmt(q.h)} h ${fmt(-q.w)} Z`)
+                ];
 
+                if (flatten) {
+                    const d = blobToSinglePathD(dStrings, geo.cuts, rf);
+                    body += `  <path fill="${blobColor(id)}" d="${d}"/>\n`;
+                    continue;
+                }
+
+                // fallback when paper.js is unavailable: grouped shapes + mask
                 let maskAttr = '';
                 if (geo.cuts.length) {
                     defs += `    <mask id="cut${id}" maskUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}">` +
@@ -1005,7 +1039,7 @@
                     maskAttr = ` mask="url(#cut${id})"`;
                 }
                 body += `  <g fill="${blobColor(id)}"${maskAttr}>\n    ` +
-                    shapes.join('\n    ') + `\n  </g>\n`;
+                    dStrings.map(d => `<path d="${d}"/>`).join('\n    ') + `\n  </g>\n`;
             }
 
             return `<?xml version="1.0" encoding="UTF-8"?>\n` +
