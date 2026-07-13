@@ -134,6 +134,15 @@
             margin-bottom: 8px;
         }
 
+        .guide-status {
+            font-size: 12px;
+            color: var(--anthropic-mid-gray);
+            margin-top: 8px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         .slider-container {
             display: flex;
             align-items: center;
@@ -339,6 +348,13 @@
             overflow: hidden;
             box-shadow: 0 20px 40px rgba(20, 20, 19, 0.1);
             background: white;
+            position: relative;
+        }
+
+        #onion-skin {
+            position: absolute;
+            pointer-events: none;
+            display: none;
         }
 
         #canvas-container canvas {
@@ -407,7 +423,7 @@
                 <div class="control-group">
                     <label>Columns</label>
                     <div class="slider-container">
-                        <input type="range" id="cols" min="4" max="28" step="1" value="14" oninput="updateParam('cols', this.value)">
+                        <input type="range" id="cols" min="4" max="56" step="1" value="14" oninput="updateParam('cols', this.value)">
                         <span class="value-display" id="cols-value">14</span>
                     </div>
                 </div>
@@ -415,7 +431,7 @@
                 <div class="control-group">
                     <label>Rows</label>
                     <div class="slider-container">
-                        <input type="range" id="rows" min="3" max="20" step="1" value="9" oninput="updateParam('rows', this.value)">
+                        <input type="range" id="rows" min="3" max="40" step="1" value="9" oninput="updateParam('rows', this.value)">
                         <span class="value-display" id="rows-value">9</span>
                     </div>
                 </div>
@@ -449,6 +465,41 @@
                     <div class="slider-container">
                         <input type="range" id="diagonal" min="0" max="1" step="0.05" value="1" oninput="updateParam('diagonal', this.value)">
                         <span class="value-display" id="diagonal-value">1.00</span>
+                    </div>
+                </div>
+                </div>
+                </details>
+            </div>
+
+            <!-- Shape Guide Section -->
+            <div class="control-section">
+                <details class="section">
+                <summary>Shape Guide</summary>
+                <div class="section-body">
+
+                <div class="control-group">
+                    <label>Guide image — dark areas grow dense</label>
+                    <input type="file" id="guide-file" accept="image/*" style="display:none" onchange="loadGuideImage(this.files[0])">
+                    <div class="button-row">
+                        <button class="button secondary" onclick="document.getElementById('guide-file').click()">Load Image…</button>
+                        <button class="button tertiary" id="guide-clear" onclick="clearGuideImage()" disabled>Clear</button>
+                    </div>
+                    <div class="guide-status" id="guide-status">No image loaded</div>
+                </div>
+
+                <div class="control-group">
+                    <label>Influence</label>
+                    <div class="slider-container">
+                        <input type="range" id="guideInfluence" min="0" max="1" step="0.05" value="0.85" oninput="updateParam('guideInfluence', this.value)">
+                        <span class="value-display" id="guideInfluence-value">0.85</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Onion Skin</label>
+                    <div class="slider-container">
+                        <input type="range" id="onionOpacity" min="0" max="1" step="0.05" value="0" oninput="updateOnionOpacity(this.value)">
+                        <span class="value-display" id="onionOpacity-value">0.00</span>
                     </div>
                 </div>
                 </div>
@@ -567,6 +618,7 @@
         <div class="canvas-area">
             <div id="canvas-container">
                 <div class="loading">Initializing generative art...</div>
+                <img id="onion-skin" alt="">
             </div>
         </div>
     </div>
@@ -588,6 +640,7 @@
             gap: 0.10,           // synaptic cleft, as a fraction of cell size
             roundness: 1.0,      // convex corner radius factor (1 = full circles)
             filletDepth: 1.0,    // concave fillet radius factor (1 = full metaball cusps)
+            guideInfluence: 0.85, // how strongly the guide image's darkness biases growth
             palette: [],         // selected swatch colors; blobs pick per-blob when non-empty
             inkColor: '#000000',
             paperColor: '#ffffff'
@@ -634,6 +687,173 @@
         let blobCount = 0;
         let cellSize = 0;
         let layer = null;     // offscreen buffer, reused for every blob
+        let guideImg = null;  // uploaded shape-guide image, resampled on grid changes
+        let guideField = null; // per-cell darkness 0..1 at grid resolution
+
+        // Downsample the guide image to one darkness value per cell (contain-fit,
+        // centered, white letterbox). Grid cells are square, so grid units and
+        // canvas pixels have the same aspect ratio.
+        //
+        // Sampling is feature-preserving, not plain averaging: a thin line
+        // narrower than a cell barely moves the cell's mean, so mean-luminance
+        // sampling paints over white channels (and drops dark strokes) as soon
+        // as the grid gets coarse. Instead each cell is supersampled K×K, and
+        // a cell crossed by a significant amount of the tone that is SCARCE in
+        // its 3×3-cell neighborhood snaps to that tone: white traces through
+        // dark masses stay open, dark line art on white paper stays inked.
+        // Half-and-half neighborhoods (silhouette boundaries) have no scarce
+        // tone and keep their mean — the soft, ragged organic edge.
+        function sampleGuideField() {
+            guideField = null;
+            if (!guideImg) return;
+            const K = 4; // subsamples per cell axis
+            const cw = params.cols * K, ch = params.rows * K;
+            const c = document.createElement('canvas');
+            c.width = cw; c.height = ch;
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, cw, ch);
+            ctx.imageSmoothingQuality = 'high';
+            const sc = Math.min(cw / guideImg.width, ch / guideImg.height);
+            const w = guideImg.width * sc, h = guideImg.height * sc;
+            ctx.drawImage(guideImg, (cw - w) / 2, (ch - h) / 2, w, h);
+            const px = ctx.getImageData(0, 0, cw, ch).data;
+
+            // fine darkness samples, auto-levels stretched to 0..1 so a
+            // non-black subject (e.g. dark blue) can still reach weight 1
+            const fine = new Float32Array(cw * ch);
+            let lo = 1, hi = 0;
+            for (let i = 0; i < cw * ch; i++) {
+                const d = 1 - (0.2126 * px[4 * i] + 0.7152 * px[4 * i + 1] + 0.0722 * px[4 * i + 2]) / 255;
+                fine[i] = d;
+                if (d < lo) lo = d;
+                if (d > hi) hi = d;
+            }
+            if (hi > lo) for (let i = 0; i < fine.length; i++) fine[i] = (fine[i] - lo) / (hi - lo);
+
+            // Interior-light classification (morphological reconstruction):
+            // light that cannot be reached from the image border through
+            // comfortably-wide light is interior to the artwork — channels,
+            // pools, enclosed holes — and must be avoided outright, even where
+            // a cell only partially overlaps it. Background light (the true
+            // outside) keeps soft mean-weighted edges: the ragged organic rim.
+            //   1. erode the light mask so only wide-open light survives
+            //   2. flood-fill the eroded core from the border = background core
+            //   3. dilate back out = the full background region
+            //   4. light outside that reconstruction = interior light
+            const rad = Math.round(1.25 * K);
+            const light = new Uint8Array(cw * ch);
+            for (let i = 0; i < fine.length; i++) light[i] = fine[i] < 0.35 ? 1 : 0;
+            const windowAll = (src, W, H, want) => { // erode (want=all) / dilate (want=any)
+                const mid = new Uint8Array(W * H), out = new Uint8Array(W * H);
+                for (let y = 0; y < H; y++) {
+                    const pre = new Int32Array(W + 1);
+                    for (let x = 0; x < W; x++) pre[x + 1] = pre[x] + src[y * W + x];
+                    for (let x = 0; x < W; x++) {
+                        const a = Math.max(0, x - rad), b = Math.min(W - 1, x + rad);
+                        const n = pre[b + 1] - pre[a];
+                        mid[y * W + x] = want === 'all' ? (n === b - a + 1 ? 1 : 0) : (n > 0 ? 1 : 0);
+                    }
+                }
+                for (let x = 0; x < W; x++) {
+                    const pre = new Int32Array(H + 1);
+                    for (let y = 0; y < H; y++) pre[y + 1] = pre[y] + mid[y * W + x];
+                    for (let y = 0; y < H; y++) {
+                        const a = Math.max(0, y - rad), b = Math.min(H - 1, y + rad);
+                        const n = pre[b + 1] - pre[a];
+                        out[y * W + x] = want === 'all' ? (n === b - a + 1 ? 1 : 0) : (n > 0 ? 1 : 0);
+                    }
+                }
+                return out;
+            };
+            const core = windowAll(light, cw, ch, 'all');
+            const bgCore = new Uint8Array(cw * ch);
+            const stack = [];
+            for (let x = 0; x < cw; x++) { stack.push(x, (ch - 1) * cw + x); }
+            for (let y = 0; y < ch; y++) { stack.push(y * cw, y * cw + cw - 1); }
+            for (const i of stack) if (core[i]) bgCore[i] = 1;
+            while (stack.length) {
+                const i = stack.pop();
+                if (!bgCore[i]) continue;
+                const x = i % cw, y = (i / cw) | 0;
+                for (const j of [i - 1, i + 1, i - cw, i + cw]) {
+                    if (j < 0 || j >= cw * ch) continue;
+                    if ((j === i - 1 && x === 0) || (j === i + 1 && x === cw - 1)) continue;
+                    if (core[j] && !bgCore[j]) { bgCore[j] = 1; stack.push(j); }
+                }
+            }
+            const bg = windowAll(bgCore, cw, ch, 'any');
+
+            // per cell: mean darkness + fractions of clearly-light/dark/interior-light subsamples
+            const mean = [], fLight = [], fDark = [], fInt = [];
+            for (let y = 0; y < params.rows; y++) {
+                mean.push([]); fLight.push([]); fDark.push([]); fInt.push([]);
+                for (let x = 0; x < params.cols; x++) {
+                    let m = 0, fl = 0, fd = 0, fi = 0;
+                    for (let sy = 0; sy < K; sy++)
+                        for (let sx = 0; sx < K; sx++) {
+                            const i = (y * K + sy) * cw + x * K + sx;
+                            const d = fine[i];
+                            m += d;
+                            if (d < 0.25) fl++;
+                            if (d > 0.75) fd++;
+                            if (light[i] && !bg[i]) fi++;
+                        }
+                    mean[y].push(m / (K * K));
+                    fLight[y].push(fl / (K * K));
+                    fDark[y].push(fd / (K * K));
+                    fInt[y].push(fi / (K * K));
+                }
+            }
+
+            const FEATURE = 0.28; // min fraction of a cell a crossing tone must cover
+            // a line CROSSES a cell iff the opposite tone flanks it on both
+            // sides of some axis — neighborhood averages fail at junctions,
+            // where a channel meets open areas and the context stops being
+            // one-sided, exactly where protection matters most. A boundary
+            // cell has dark on one side only, so it keeps its soft mean.
+            const m = (x, y) => (x < 0 || y < 0 || x >= params.cols || y >= params.rows) ? 0 : mean[y][x];
+            guideField = Array.from({length: params.rows}, (_, y) =>
+                Array.from({length: params.cols}, (_, x) => {
+                    const pairDark = (m(x - 1, y) > 0.6 && m(x + 1, y) > 0.6) ||
+                                     (m(x, y - 1) > 0.6 && m(x, y + 1) > 0.6);
+                    const pairLight = (m(x - 1, y) < 0.4 && m(x + 1, y) < 0.4) ||
+                                      (m(x, y - 1) < 0.4 && m(x, y + 1) < 0.4);
+                    if (fInt[y][x] >= 0.2) return 0;                    // touches interior light
+                    if (fLight[y][x] >= FEATURE && pairDark) return 0;  // light line through dark
+                    if (fDark[y][x] >= FEATURE && pairLight) return 1;  // dark line through light
+                    return mean[y][x];
+                }));
+        }
+
+        // Growth weight of a cell: 1 everywhere without a guide; with one, the
+        // cell's darkness pulled toward 1 by (1 - influence), then cubed so
+        // mid-grays thin out. Weights below the floor snap to 0 — forbidden,
+        // not just rare. Without this, weighted picks are only relative: once a
+        // blob's dark neighborhood fills up, white cells become the least-bad
+        // option and growth spills across the guide's edges, spending density
+        // budget outside the shape (gaps inside, ink outside).
+        function cellWeight(x, y) {
+            if (!guideField) return 1;
+            const w = 1 - params.guideInfluence * (1 - guideField[y][x]);
+            const w3 = w * w * w;
+            return w3 < 0.02 ? 0 : w3;
+        }
+
+        // Seeded weighted choice. With all weights equal this consumes exactly
+        // one random() and picks uniformly — identical to the unguided picker —
+        // so pre-guide seeds still reproduce their original compositions.
+        function weightedPick(cells) {
+            let total = 0;
+            for (const [x, y] of cells) total += cellWeight(x, y);
+            if (total <= 0) return null;
+            let r = random(total);
+            for (const c of cells) {
+                r -= cellWeight(c[0], c[1]);
+                if (r <= 0) return c;
+            }
+            return cells[cells.length - 1];
+        }
 
         function blobAt(x, y) {
             if (x < 0 || y < 0 || x >= params.cols || y >= params.rows) return 0;
@@ -658,6 +878,9 @@
                 // pair sitting in the two between-cells
                 const b1 = blobAt(nx, y), b2 = blobAt(x, ny);
                 if (b1 !== 0 && b1 === b2) continue;
+                // forbid a neck that would paint across a guide-protected
+                // light cell (the neck ink renders over the between-cells)
+                if (guideField && (cellWeight(nx, y) === 0 || cellWeight(x, ny) === 0)) continue;
                 out.push([nx, ny]);
             }
             return out;
@@ -684,15 +907,23 @@
             const h = Math.round(params.rows * cellSize + 2 * MARGIN);
             if (height !== h) resizeCanvas(CANVAS_W, h);
 
+            sampleGuideField();
             buildGrid();
             render();
+            updateOnionSkin();
         }
 
         function buildGrid() {
             grid = Array.from({length: params.rows}, () => new Array(params.cols).fill(0));
             blobHue = [0];
             blobCount = 0;
-            const target = Math.round(params.density * params.cols * params.rows);
+            // density applies to the guide-weighted capacity, so the slider
+            // still means "how full does the (shaped) composition get"
+            let capacity = 0;
+            for (let y = 0; y < params.rows; y++)
+                for (let x = 0; x < params.cols; x++)
+                    capacity += cellWeight(x, y);
+            const target = Math.round(params.density * capacity);
             let occupied = 0;
 
             while (occupied < target) {
@@ -703,8 +934,12 @@
                 if (!empties.length) break;
 
                 const id = ++blobCount;
+                // size random is drawn before the seed pick — keep this order,
+                // pre-guide seeds depend on the exact random() sequence
                 const size = Math.min(1 + Math.floor(random(params.blobSize)), target - occupied);
-                const [sx, sy] = empties[Math.floor(random(empties.length))];
+                const seedCell = weightedPick(empties);
+                if (!seedCell) { --blobCount; break; } // only zero-weight cells remain
+                const [sx, sy] = seedCell;
                 grid[sy][sx] = id;
                 const cells = [[sx, sy]];
 
@@ -713,23 +948,28 @@
                     const base = random() < params.snakiness
                         ? cells[cells.length - 1]
                         : cells[Math.floor(random(cells.length))];
-                    let opts;
+                    let pick;
                     if (random() < params.diagonal) {
-                        opts = emptyDiagonals(base[0], base[1]);
-                        if (!opts.length) opts = emptyNeighbors(base[0], base[1]);
+                        pick = weightedPick(emptyDiagonals(base[0], base[1]));
+                        if (!pick) pick = weightedPick(emptyNeighbors(base[0], base[1]));
                     } else {
-                        opts = emptyNeighbors(base[0], base[1]);
+                        pick = weightedPick(emptyNeighbors(base[0], base[1]));
                     }
-                    if (!opts.length) {
-                        opts = cells.flatMap(c => emptyNeighbors(c[0], c[1]));
-                        if (!opts.length) break; // blob is fully walled in
+                    if (!pick) {
+                        pick = weightedPick(cells.flatMap(c => emptyNeighbors(c[0], c[1])));
+                        if (!pick) break; // blob is fully walled in
                     }
-                    const [nx, ny] = opts[Math.floor(random(opts.length))];
+                    const [nx, ny] = pick;
                     grid[ny][nx] = id;
                     cells.push([nx, ny]);
                 }
                 blobHue[id] = random(); // reserved per blob for palette assignment
-                occupied += cells.length;
+                // each cell consumes its own weight from the budget (1 when
+                // unguided — identical to counting cells). Charging a full 1.0
+                // for a low-weight edge cell would drain budget contributed by
+                // the dark interior, leaving bald patches at coarse grids where
+                // the antialiased edge band is a large share of the shape.
+                occupied += cells.reduce((a, c) => a + cellWeight(c[0], c[1]), 0);
             }
         }
 
@@ -846,6 +1086,10 @@
                         const b1 = blobAt(x + 1, y), b2 = blobAt(x, y + dy);
                         if (b1 === id || b2 === id) continue;       // fused via L-bend already
                         if (b1 !== 0 && b1 === b2) continue;        // would cross another blob's neck
+                        // a blob that wrapped around a guide-protected light
+                        // cell still ends up diagonally adjacent to itself —
+                        // don't let the neck ink bridge over the channel
+                        if (guideField && (cellWeight(x + 1, y) === 0 || cellWeight(x, y + dy) === 0)) continue;
                         necks.push({
                             p1x: MARGIN + (x + 0.5) * s, p1y: MARGIN + (y + 0.5) * s,
                             p2x: MARGIN + (dxc + 0.5) * s, p2y: MARGIN + (dyc + 0.5) * s
@@ -1070,6 +1314,59 @@
             initializeSystem();
         }
 
+        let guideURL = null;   // kept alive for the onion-skin overlay
+        let onionOpacity = 0;  // view-only preview aid; not a generation param
+
+        function loadGuideImage(file) {
+            if (!file) return;
+            const img = new Image();
+            const url = URL.createObjectURL(file);
+            img.onload = () => {
+                if (guideURL) URL.revokeObjectURL(guideURL);
+                guideURL = url;
+                guideImg = img;
+                document.getElementById('onion-skin').src = url;
+                document.getElementById('guide-status').textContent = file.name;
+                document.getElementById('guide-clear').disabled = false;
+                initializeSystem();
+            };
+            img.src = url;
+        }
+
+        function clearGuideImage() {
+            guideImg = null;
+            if (guideURL) { URL.revokeObjectURL(guideURL); guideURL = null; }
+            document.getElementById('guide-file').value = '';
+            document.getElementById('guide-status').textContent = 'No image loaded';
+            document.getElementById('guide-clear').disabled = true;
+            initializeSystem();
+        }
+
+        // Overlay the guide image on the canvas at the exact contain-fit
+        // placement sampleGuideField uses, scaled to the displayed canvas size.
+        function updateOnionSkin() {
+            const el = document.getElementById('onion-skin');
+            const canvas = document.querySelector('#canvas-container canvas');
+            if (!guideImg || !onionOpacity || !canvas) { el.style.display = 'none'; return; }
+            const scale = canvas.offsetWidth / CANVAS_W;
+            const sc = Math.min(params.cols / guideImg.width, params.rows / guideImg.height);
+            const w = guideImg.width * sc * cellSize, h = guideImg.height * sc * cellSize;
+            const left = MARGIN + (params.cols * cellSize - w) / 2;
+            const top = MARGIN + (params.rows * cellSize - h) / 2;
+            el.style.display = 'block';
+            el.style.opacity = onionOpacity;
+            el.style.left = (canvas.offsetLeft + left * scale) + 'px';
+            el.style.top = (canvas.offsetTop + top * scale) + 'px';
+            el.style.width = (w * scale) + 'px';
+            el.style.height = (h * scale) + 'px';
+        }
+
+        function updateOnionOpacity(value) {
+            onionOpacity = parseFloat(value);
+            document.getElementById('onionOpacity-value').textContent = onionOpacity.toFixed(2);
+            updateOnionSkin();
+        }
+
         function updateColor(name, value) {
             params[name] = value;
             document.getElementById(name + '-value').textContent = value;
@@ -1167,7 +1464,7 @@
             renderSwatches();
             renderPaperSwatches();
 
-            for (const name of ['cols', 'rows', 'density', 'blobSize', 'snakiness', 'diagonal', 'neckWidth', 'gap', 'roundness', 'filletDepth']) {
+            for (const name of ['cols', 'rows', 'density', 'blobSize', 'snakiness', 'diagonal', 'neckWidth', 'gap', 'roundness', 'filletDepth', 'guideInfluence']) {
                 document.getElementById(name).value = params[name];
                 document.getElementById(name + '-value').textContent =
                     intParams.includes(name) ? params[name] : params[name].toFixed(2);
@@ -1182,6 +1479,7 @@
             updateSeedDisplay();
             renderPaperSwatches();
         });
+        window.addEventListener('resize', updateOnionSkin);
     </script>
 </body>
 </html>
